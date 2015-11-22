@@ -1,0 +1,9 @@
+[prog1]
+cmd=/bin/somescript
+stdout=/tmp/xx.log
+stderr=/tmp/xx.log
+
+[prog2]
+cmd=/bin/somescript2
+stdout=/tmp/xx2.log
+stderr=/tmp/xx2.log
