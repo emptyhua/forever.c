@@ -2,8 +2,10 @@
 cmd=/bin/somescript
 stdout=/tmp/xx.log
 stderr=/tmp/xx.log
+user=nginx
 
 [prog2]
 cmd=/bin/somescript2
 stdout=/tmp/xx2.log
 stderr=/tmp/xx2.log
+user=nobody

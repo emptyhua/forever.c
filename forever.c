@@ -8,6 +8,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <pwd.h>
 
 #define PATH_MAX 4096
 
@@ -21,10 +22,14 @@ struct ForeverProcess_s {
     char *std_out;  /* 标准输出 */
     char *std_err;  /* 标准错误输出 */
     int pid;        /* 进程ID */
+    uid_t uid;      /* 用户ID */
     ForeverProcess_t *next;
 };
 
 void ForeverProcess_Exec(ForeverProcess_t *process) {
+    if (process->uid != 0) {
+        setuid(process->uid);
+    }
 
     prctl(PR_SET_PDEATHSIG, SIGKILL);
 
@@ -122,6 +127,23 @@ void parse_ini(const char *ini_path, ForeverProcess_t **process_list_p) {
             process->std_err = strdup(value);
         }
 
+        snprintf(key, PATH_MAX, "%s:user", sec_name);
+        value = iniparser_getstring(cfg, key, NULL);
+        if (value)  {
+            struct passwd *u;
+            u = getpwnam((const char *)value);
+            if (u == NULL) {
+                fprintf(stderr, "invalid user %s\n", value);
+                exit(EXIT_FAILURE);
+            }
+
+            if (u->pw_uid != getuid() && u->pw_uid != 0) {
+                fprintf(stderr, "must run as root\n");
+                exit(EXIT_FAILURE);
+            }
+            process->uid = u->pw_uid;
+        }
+
         if (last_process) {
             last_process->next = process;
             last_process = process;
@@ -132,7 +154,7 @@ void parse_ini(const char *ini_path, ForeverProcess_t **process_list_p) {
     }
 
     if (process_list == NULL) {
-        fprintf(stderr, "nothing to do");
+        fprintf(stderr, "nothing to do\n");
         exit(EXIT_FAILURE);
     }
 
@@ -245,7 +267,7 @@ int main(int argc, char **argv) {
     while(process) {
         pid = fork();
         if (pid < 0) {
-            fprintf(stderr, "can't fork()");
+            fprintf(stderr, "can't fork()\n");
             exit(EXIT_FAILURE);
         } else if (pid > 0) {
             process->pid = pid;
@@ -275,7 +297,7 @@ int main(int argc, char **argv) {
                 usleep(1000 * 100);
                 pid = fork();
                 if (pid < 0) {
-                    fprintf(stderr, "can't fork()");
+                    fprintf(stderr, "can't fork()\n");
                     exit(EXIT_FAILURE);
                 } else if (pid > 0) {
                     process->pid = pid;
