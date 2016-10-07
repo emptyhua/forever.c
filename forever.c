@@ -14,6 +14,7 @@
 #include "iniparser.h"
 #include "parse_args.h"
 
+
 #define PATH_MAX 4096
 #define mfprintf(stream, format, ...) \
     do {\
@@ -26,7 +27,7 @@
         fprintf(stream, \
                 "%s: "format"\n",\
                 time_buffer,\
-##__VA_ARGS__);\
+                ##__VA_ARGS__);\
     }while(0)
 
 typedef struct ForeverProcess_s ForeverProcess_t;
@@ -281,8 +282,7 @@ void parse_ini(const char *ini_path, ForeverProcess_t **process_list_p) {
     *process_list_p     = process_list;
 }
 
-void make_daemon()
-{
+void make_daemon() {
     pid_t pid;
 
     pid = fork();
@@ -333,7 +333,7 @@ static void check_mem(uv_timer_t *handle) {
             size_t cmem = get_rss_by_pid(process->pid);
             if (cmem > process->maxmem) {
                 mfprintf(stderr, "ERROR: %s reach max mem limit, cur:%zu, max:%zu", process->cmd, cmem, process->maxmem);
-                uv_kill(process->pid, 9);
+                uv_kill(process->pid, SIGTERM);
             }
         }
         process = process->next;
