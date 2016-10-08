@@ -40,6 +40,7 @@ struct ForeverProcess_s {
     uid_t uid;      /* 用户ID */
     gid_t gid;      /* 用户组ID */
     size_t maxmem;  /* 最大内存限制 */
+    char *cwd;      /* 当前路径 */
     char **args;
     uv_process_t uv_process;
     int restart_delay;/* 重启延迟 */
@@ -128,8 +129,13 @@ void ForeverProcess_Exec(ForeverProcess_t *process) {
         child_stdio[2].flags = UV_IGNORE;
     }
 
+    if (process->cwd) {
+        options.cwd = process->cwd;
+    } else {
+        options.cwd = NULL;
+    }
+
     options.env = NULL;
-    options.cwd = NULL;
     options.stdio_count = 3;
     options.stdio = child_stdio;
     options.args = process->args;
@@ -209,6 +215,12 @@ void parse_ini(const char *ini_path, ForeverProcess_t **process_list_p) {
         process = calloc(1, sizeof(ForeverProcess_t));
         process->cmd  = strdup(value);
         process->args = cmd2args(value);
+
+        snprintf(key, PATH_MAX, "%s:cwd", sec_name);
+        value = iniparser_getstring(cfg, key, NULL);
+        if (value)  {
+            process->cwd = strdup(value);
+        }
 
         snprintf(key, PATH_MAX, "%s:stdout", sec_name);
         value = iniparser_getstring(cfg, key, NULL);
@@ -353,6 +365,17 @@ static void check_mem(uv_timer_t *handle) {
     }
 }
 
+static void cleanup(int signal) {
+    ForeverProcess_t *process = process_list;
+    while(process) {
+        if (process->pid) {
+            uv_kill(process->pid, SIGTERM);
+        }
+        process = process->next;
+    }
+    exit(0);
+}
+
 int main(int argc, char **argv) {
     char ini_path[PATH_MAX] = {'\0'};
     char pid_path[PATH_MAX] = {'\0'};
@@ -430,6 +453,7 @@ int main(int argc, char **argv) {
     }
 
     signal(SIGPIPE, SIG_IGN);
+    signal(SIGTERM, cleanup);
 
     uv_timer_init(uv_default_loop(), &timer);
     uv_timer_start(&timer, check_mem, 1000, 5000);
