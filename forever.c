@@ -174,6 +174,7 @@ void usage() {
 char **cmd2args(const char *cmd) {
     static char *prefix = "/usr/bin/env ";
     char *tmp = malloc((strlen(prefix) + strlen(cmd) + 1) * sizeof(char));
+    tmp[0] = '\0';
     stpcpy(stpcpy(tmp, prefix), cmd);
     char **args = parse_args(tmp);
     free(tmp);
