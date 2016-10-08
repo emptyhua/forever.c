@@ -42,14 +42,24 @@ struct ForeverProcess_s {
     size_t maxmem;  /* 最大内存限制 */
     char **args;
     uv_process_t uv_process;
+    int restart_delay;/* 重启延迟 */
+    uv_timer_t restart_timer;/* 重启timer */
     ForeverProcess_t *next;
 };
 
 void ForeverProcess_Exec(ForeverProcess_t *process);
 
+static void child_restart(uv_timer_t *handle) {
+    ForeverProcess_t *process = (ForeverProcess_t *)handle->data;
+    uv_timer_stop(&process->restart_timer);
+    ForeverProcess_Exec(process);
+}
+
 static void child_close_cb(uv_handle_t* uv_process) {
     ForeverProcess_t *process = (ForeverProcess_t *)uv_process->data;
-    ForeverProcess_Exec(process);
+    uv_timer_init(uv_default_loop(), &process->restart_timer);
+    process->restart_timer.data = process;
+    uv_timer_start(&process->restart_timer, child_restart, process->restart_delay * 1000, 0);
 }
 
 static void child_exit_cb(uv_process_t *uv_process, int64_t exit_status, int term_signal) {
@@ -260,6 +270,9 @@ void parse_ini(const char *ini_path, ForeverProcess_t **process_list_p) {
 
         snprintf(key, PATH_MAX, "%s:maxmem", sec_name);
         process->maxmem = iniparser_getint(cfg, key, 0) * 1024 * 1024;
+
+        snprintf(key, PATH_MAX, "%s:restart_delay", sec_name);
+        process->restart_delay = iniparser_getint(cfg, key, 1);
 
         if (last_process) {
             last_process->next = process;
