@@ -28,6 +28,7 @@
                 "%s: "format"\n",\
                 time_buffer,\
                 ##__VA_ARGS__);\
+        fflush(stream);\
     }while(0)
 
 typedef struct ForeverProcess_s ForeverProcess_t;
