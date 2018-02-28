@@ -194,9 +194,15 @@ void make_daemon() {
     umask(0);
     chdir("/");
 
-    close(STDIN_FILENO);
-    close(STDOUT_FILENO);
-    close(STDERR_FILENO);
+    int  fd = open("/dev/null", O_RDWR);
+    if (fd < 0) {
+        exit(EXIT_SUCCESS);
+    }
+
+    dup2(fd, STDIN_FILENO);
+    dup2(fd, STDOUT_FILENO);
+    dup2(fd, STDERR_FILENO);
+    close(fd);
 }
 
 
