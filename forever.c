@@ -196,7 +196,7 @@ void make_daemon() {
 
     int  fd = open("/dev/null", O_RDWR);
     if (fd < 0) {
-        exit(EXIT_SUCCESS);
+        exit(EXIT_FAILURE);
     }
 
     dup2(fd, STDIN_FILENO);
