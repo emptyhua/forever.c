@@ -1,5 +1,6 @@
 CFLAGS=-Wall -g -I./libuv/include
-LDFLAGS=-lrt -lpthread -lnsl -ldl -lm
+#LDFLAGS=-lrt -lpthread -lnsl -ldl -lm
+LDFLAGS=-lpthread
 
 all:forever
 
