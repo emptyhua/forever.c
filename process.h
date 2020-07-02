@@ -19,6 +19,7 @@ struct ForeverProcess_s {
     gid_t gid;      /* 用户组ID */
     size_t maxmem;  /* 最大内存限制 */
     char *cwd;      /* 当前路径 */
+    char **env;     /* 环境变量 */
     char **args;
     uv_process_t uv_process;
     int restart_delay;/* 重启延迟 */

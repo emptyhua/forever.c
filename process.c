@@ -45,6 +45,7 @@ void ForeverProcess_Free(ForeverProcess_t *process) {
     if (process->std_out) free(process->std_out);
     if (process->std_err) free(process->std_err);
     if (process->cwd) free(process->cwd);
+    if (process->env) free_args(process->env);
     if (process->args) free_args(process->args);
     free(process);
 }
@@ -114,7 +115,7 @@ void ForeverProcess_Exec(ForeverProcess_t *process) {
         options.cwd = NULL;
     }
 
-    options.env = NULL;
+    options.env = process->env;
     options.stdio_count = 3;
     options.stdio = child_stdio;
     options.args = process->args;

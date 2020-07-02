@@ -11,3 +11,7 @@ forever:$(objects)
 
 %.o:%.c
 	gcc $(CFLAGS) -c $< -o $@
+
+clean:
+	rm *.o
+	rm forever

@@ -95,6 +95,37 @@ ProcessList_t *parse_ini(const char *ini_path) {
                 process->cwd = cwd;
             }
 
+            toml_array_t *envarr;
+            if (0 != (envarr = toml_array_in(sec, "env"))) {
+                if (toml_array_type(envarr) != 's') {
+                    mfprintf(stderr, "ERROR: invalid %s.env type", process->name);
+                    goto ERROR;
+                }
+
+                int n = toml_array_nelem(envarr);
+                if (n > 0) {
+                    char **envs = calloc(n+1, sizeof(char *));
+
+                    for (int i = 0; i < n; i ++) {
+                        if (0 != (svalue = toml_raw_at(envarr, i))) {
+                            char *env;
+                            if (toml_rtos(svalue, &env)) {
+                                mfprintf(stderr, "ERROR: can't parse %s.[%d]", process->name, i);
+                                free_args(envs);
+                                goto ERROR;
+                            }
+                            envs[i] = env;
+                        } else {
+                            mfprintf(stderr, "ERROR: can't parse %s.env[%d]", process->name, i);
+                            free_args(envs);
+                            goto ERROR;
+                        }
+                    }
+
+                    process->env = envs;
+                }
+            }
+
             if (0 != (svalue = toml_raw_in(sec, "stdout"))) {
                 char *p;
                 if (toml_rtos(svalue, &p)) {
