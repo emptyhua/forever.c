@@ -8,11 +8,11 @@
 #include <grp.h>
 #include <sys/resource.h>
 #include <limits.h>
+#include <errno.h>
 
 #include <uv.h>
 
-#include "dictionary.h"
-#include "iniparser.h"
+#include "toml.h"
 
 #include "forever.h"
 #include "parse_args.h"
@@ -43,125 +43,167 @@ char **cmd2args(const char *cmd) {
 }
 
 ProcessList_t *parse_ini(const char *ini_path) {
-    int                 sec_count;
-    dictionary          *cfg = NULL;
+    FILE* fp;
+    char errbuf[200];
+    toml_table_t *cfg = NULL;
+    toml_table_t *sec = NULL;
+    int i;
+    const char* key = NULL;
+    const char *svalue = NULL;
+    int64_t ivalue;
     ProcessList_t       *process_list = ProcessList_New();
-    int                 i;
 
-    const char *sec_name = NULL;
-    char        key[PATH_MAX];
-    char        *value = NULL;
     ForeverProcess_t *process = NULL;
 
 
-    cfg = iniparser_load(ini_path);
-    if (cfg == NULL) {
-        mfprintf(stderr, "ERROR: can't open %s", ini_path);
+    if (0 == (fp = fopen(ini_path, "r"))) {
+        mfprintf(stderr, "ERROR: can't open %s %s", ini_path, strerror(errno));
         goto ERROR;
     }
 
-    sec_count = iniparser_getnsec(cfg);
-    if (sec_count == 0) {
-        mfprintf(stderr, "ERROR: %s have no sections", ini_path);
+    cfg = toml_parse_file(fp, errbuf, sizeof(errbuf));
+    if (0 == cfg) {
+        mfprintf(stderr, "ERROR: %s", errbuf);
         goto ERROR;
     }
 
-    for (i = 0; i < sec_count; i ++) {
-        sec_name = iniparser_getsecname(cfg, i);
-        if (!sec_name) continue;
+    for (i = 0; 0 != (key = toml_key_in(cfg, i)); i++) {
+        if (0 != (sec = toml_table_in(cfg, key))) {
+            if (0 == (svalue = toml_raw_in(sec, "cmd"))) {
+                continue;
+            }
 
-        snprintf(key, PATH_MAX, "%s:cmd", sec_name);
-        value = iniparser_getstring(cfg, key, NULL);
-        if (!value) continue;
+            process = ForeverProcess_New();
+            process->name = strdup(key);
 
-        process = ForeverProcess_New();
-        process->name = strdup(sec_name);
+            char *cmd;
+            if (toml_rtos(svalue, &cmd)) {
+                mfprintf(stderr, "ERROR: can't parse %s.cmd", process->name);
+                goto ERROR;
+            }
 
-        process->cmd  = strdup(value);
-        process->args = cmd2args(value);
+            process->cmd  = cmd;
+            process->args = cmd2args(cmd);
 
-        snprintf(key, PATH_MAX, "%s:cwd", sec_name);
-        value = iniparser_getstring(cfg, key, NULL);
-        if (value)  {
-            process->cwd = strdup(value);
+            if (0 != (svalue = toml_raw_in(sec, "cwd"))) {
+                char *cwd;
+                if (toml_rtos(svalue, &cwd)) {
+                    mfprintf(stderr, "ERROR: can't parse %s.cwd", process->name);
+                    goto ERROR;
+                }
+
+                process->cwd = cwd;
+            }
+
+            if (0 != (svalue = toml_raw_in(sec, "stdout"))) {
+                char *p;
+                if (toml_rtos(svalue, &p)) {
+                    mfprintf(stderr, "ERROR: can't parse %s.stdout", process->name);
+                    goto ERROR;
+                }
+
+                FILE *fp = fopen(p, "a+");
+                if (!fp) {
+                    mfprintf(stderr, "ERROR: can't open %s %s", p, strerror(errno));
+                    goto ERROR;
+                }
+                fclose(fp);fp = NULL;
+                process->std_out = p;
+            }
+
+            if (0 != (svalue = toml_raw_in(sec, "stderr"))) {
+                char *p;
+                if (toml_rtos(svalue, &p)) {
+                    mfprintf(stderr, "ERROR: can't parse %s.stderr", process->name);
+                    goto ERROR;
+                }
+
+                FILE *fp = fopen(p, "a+");
+                if (!fp) {
+                    mfprintf(stderr, "ERROR: can't open %s %s", p, strerror(errno));
+                    goto ERROR;
+                }
+                fclose(fp);fp = NULL;
+                process->std_err = p;
+            }
+
+            if (0 != (svalue = toml_raw_in(sec, "user"))) {
+                char *user;
+                if (toml_rtos(svalue, &user)) {
+                    mfprintf(stderr, "ERROR: can't parse %s.user", process->name);
+                    goto ERROR;
+                }
+
+                struct passwd *u;
+                u = getpwnam(user);
+                if (u == NULL) {
+                    mfprintf(stderr, "ERROR: invalid user %s", user);
+                    free(user);user = NULL;
+                    goto ERROR;
+                }
+                free(user);user = NULL;
+
+                if (u->pw_uid != getuid() && getuid() != 0) {
+                    mfprintf(stderr, "ERROR: you must run as root to set uid");
+                    goto ERROR;
+                }
+                process->uid = u->pw_uid;
+            }
+
+            if (0 != (svalue = toml_raw_in(sec, "group"))) {
+                char *group;
+                if (toml_rtos(svalue, &group)) {
+                    mfprintf(stderr, "ERROR: can't parse %s.group", process->name);
+                    goto ERROR;
+                }
+
+                struct group *grp;
+                grp = getgrnam(group);
+                if (grp == NULL) {
+                    mfprintf(stderr, "ERROR: invalid group %s", svalue);
+                    free(group); group = NULL;
+                    goto ERROR;
+                }
+                free(group); group = NULL;
+
+                if (grp->gr_gid != getgid() && getuid() != 0) {
+                    mfprintf(stderr, "ERROR: you must run as root to set gid");
+                    goto ERROR;
+                }
+                process->gid = grp->gr_gid;
+            }
+
+            if (0 != (svalue = toml_raw_in(sec, "maxmem"))) {
+                if (toml_rtoi(svalue, &ivalue)) {
+                    mfprintf(stderr, "ERROR: invalid maxmem %s", svalue);
+                    goto ERROR;
+                }
+                process->maxmem = (size_t)ivalue;
+            }
+
+            if (0 != (svalue = toml_raw_in(sec, "restart_delay"))) {
+                if (toml_rtoi(svalue, &ivalue)) {
+                    mfprintf(stderr, "ERROR: invalid restart_delay %s", svalue);
+                    goto ERROR;
+                }
+                process->restart_delay = (int)ivalue;
+            } else {
+                process->restart_delay = 2;
+            }
+
+            ProcessList_Append(process_list, process);
         }
-
-        snprintf(key, PATH_MAX, "%s:stdout", sec_name);
-        value = iniparser_getstring(cfg, key, NULL);
-        if (value)  {
-            FILE *fp = fopen(value, "a+");
-            if (!fp) {
-                mfprintf(stderr, "ERROR: can't open %s", value);
-                goto ERROR;
-            }
-            fclose(fp);fp = NULL;
-            process->std_out = strdup(value);
-        }
-
-        snprintf(key, PATH_MAX, "%s:stderr", sec_name);
-        value = iniparser_getstring(cfg, key, NULL);
-        if (value)  {
-            FILE *fp = fopen(value, "a+");
-            if (!fp) {
-                mfprintf(stderr, "ERROR: can't open %s", value);
-                goto ERROR;
-            }
-            fclose(fp);fp = NULL;
-            process->std_err = strdup(value);
-        }
-
-        snprintf(key, PATH_MAX, "%s:user", sec_name);
-        value = iniparser_getstring(cfg, key, NULL);
-        if (value)  {
-            struct passwd *u;
-            u = getpwnam((const char *)value);
-            if (u == NULL) {
-                mfprintf(stderr, "ERROR: invalid user %s", value);
-                goto ERROR;
-            }
-
-            if (u->pw_uid != getuid() && getuid() != 0) {
-                mfprintf(stderr, "ERROR: you must run as root to set uid");
-                goto ERROR;
-            }
-            process->uid = u->pw_uid;
-        }
-
-        snprintf(key, PATH_MAX, "%s:group", sec_name);
-        value = iniparser_getstring(cfg, key, NULL);
-        if (value)  {
-            struct group *grp;
-            grp = getgrnam((const char *)value);
-            if (grp == NULL) {
-                mfprintf(stderr, "ERROR: invalid group %s", value);
-                goto ERROR;
-            }
-
-            if (grp->gr_gid != getgid() && getuid() != 0) {
-                mfprintf(stderr, "ERROR: you must run as root to set gid");
-                goto ERROR;
-            }
-            process->gid = grp->gr_gid;
-        }
-
-        snprintf(key, PATH_MAX, "%s:maxmem", sec_name);
-        process->maxmem = iniparser_getint(cfg, key, 0) * 1024 * 1024;
-
-        snprintf(key, PATH_MAX, "%s:restart_delay", sec_name);
-        process->restart_delay = iniparser_getint(cfg, key, 1);
-
-        ProcessList_Append(process_list, process);
     }
 
     if (cfg) {
-        iniparser_freedict(cfg);cfg = NULL;
+        toml_free(cfg);cfg = NULL;
     }
 
     return process_list;
 
 ERROR:
     if (cfg) {
-        iniparser_freedict(cfg);cfg = NULL;
+        toml_free(cfg);cfg = NULL;
     }
 
     if (process) {

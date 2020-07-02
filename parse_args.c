@@ -85,12 +85,8 @@ END:
 void free_args(char **args) {
     if (args == NULL) return;
     int i = 0;
-    for (i = 0; i <= MAX_ARGS_COUNT; i ++) {
-        if (args[i]) {
-            free(args[i]);
-        } else {
-            break;
-        }
+    for (i = 0; args[i]; i ++) {
+        free(args[i]);
     }
     free(args);
 }

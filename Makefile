@@ -4,10 +4,10 @@ LDFLAGS=-lpthread
 
 all:forever
 
-objects=forever.o process.o parse_args.o iniparser.o dictionary.o ./libuv/.libs/libuv.a
+objects=forever.o process.o parse_args.o toml.o ./libuv/.libs/libuv.a
 
 forever:$(objects)
-	gcc $(CFLAGS) $(LDFLAGS) $(objects) -o ./forever
+	gcc $(CFLAGS) $(objects) -o ./forever $(LDFLAGS)
 
 %.o:%.c
 	gcc $(CFLAGS) -c $< -o $@
