@@ -1,3 +1,7 @@
+forever
+parse_args
+test.conf
+
 # Object files
 *.o
 *.ko

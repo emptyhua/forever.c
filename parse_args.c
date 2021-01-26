@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_ARGS_COUNT 100
-#define MAX_ARG_LENGTH 4096
+#define MAX_ARGS_COUNT 127
+#define MAX_ARG_LENGTH 4095
 
 char **parse_args(const char *command) {
 #define STATUS_FIND_BEGIN 1
@@ -15,7 +15,7 @@ char **parse_args(const char *command) {
     int arg_index = 0;
 
     int command_length = strlen(command);
-    int arg_quoted = 0;
+    char arg_quote = 0;
     int status = STATUS_FIND_BEGIN;
 
     int i = 0;
@@ -24,10 +24,10 @@ char **parse_args(const char *command) {
         if (status == STATUS_FIND_BEGIN) {
             if (c != ' ') {
                 arg_index = 0;
-                if (c == '"') {
-                    arg_quoted = 1;
+                if (c == '"' || c == '\'') {
+                    arg_quote = c;
                 } else {
-                    arg_quoted = 0;
+                    arg_quote = 0;
                     arg[arg_index++] = c;
                 }
                 status = STATUS_FIND_END;
@@ -37,32 +37,23 @@ char **parse_args(const char *command) {
                 if (i < command_length-1) {
                     switch(command[i+1]) {
                         case '"':
+                        case '\'':
                         case '\\':
                         case ' ':
                             if (arg_index < MAX_ARG_LENGTH) {
                                 arg[arg_index++] = command[i+1];
                             }
                             i ++;
-                            break;
+                            continue;
                         default:
-                            if (arg_index < MAX_ARG_LENGTH) {
-                                arg[arg_index++] = c;
-                            }
-                            break;
+                            goto COPYC;
                     }
                 } else {
-                    if (arg_index < MAX_ARG_LENGTH) {
-                        arg[arg_index++] = c;
-                    }
+                    goto COPYC;
                 }
-            } else if (arg_quoted && (c == '"' || c == '\0')) {
-                arg[arg_index] = '\0';
-                args[args_index++] = strdup(arg);
-                status = STATUS_FIND_BEGIN;
-                if (args_index >= MAX_ARGS_COUNT) {
-                    goto END;
-                }
-            } else if (!arg_quoted && (c == ' ' || c == '\0')) {
+            } else if (c == '\0'
+                    || (arg_quote != 0 && c == arg_quote)
+                    || (arg_quote == 0 && c == ' ')) {
                 arg[arg_index] = '\0';
                 args[args_index++] = strdup(arg);
                 status = STATUS_FIND_BEGIN;
@@ -70,6 +61,7 @@ char **parse_args(const char *command) {
                     goto END;
                 }
             } else {
+COPYC:
                 if (arg_index < MAX_ARG_LENGTH) {
                     arg[arg_index++] = c;
                 }
@@ -84,9 +76,9 @@ END:
 
 void free_args(char **args) {
     if (args == NULL) return;
-    int i = 0;
-    for (i = 0; args[i]; i ++) {
-        free(args[i]);
+    char **a = args;
+    while(*a) {
+        free(*a++);
     }
     free(args);
 }
@@ -94,16 +86,12 @@ void free_args(char **args) {
 #ifdef ARG_PARSER_TEST
 
 void dump_command(const char *command) {
+    printf("--------------\n");
     printf("%s\n", command);
     char **args = parse_args(command);
-    int i = 0;
-    while (1) {
-        char *arg = args[i++];
-        if (arg == NULL) {
-            break;
-        } else {
-            printf("\"%s\"\n", arg);
-        }
+    char **a = args;
+    while (*a) {
+        printf("\"%s\"\n", *a++);
     }
     free_args(args);
 }
@@ -119,6 +107,9 @@ int main(int argc, char **argv) {
     dump_command("mysql \"fas\\    dfasd\"     ");
     dump_command("\"mysql\" \"fas\\    dfasd\"     -a");
     dump_command("\"mysql\" fas\\ dfasd     -a");
+    dump_command("msyql -u'root'");
+    dump_command("mysql '-uroot' -p'\"padfs'");
+    dump_command("mysql '-uroot''''''");
     return 0;
 }
 

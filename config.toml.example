@@ -4,8 +4,16 @@ stdout="/tmp/xx.log"
 stderr="/tmp/xx.log"
 user="nginx"
 group="nginx"
-;MB
+# max memory limit, unit: MB
+# if the child process reach the threshold,
+# forever deamon will send kill signal, and restart the process
 maxmem=100
+# environment variables
+env="V1=abc V2=123"
+# delay time before process restart, uint: second, default: 2
+restart_delay=2
+# current working directory
+cwd="/tmp"
 
 [prog2]
 cmd="/bin/somescript2"

@@ -45,9 +45,18 @@ void ForeverProcess_Free(ForeverProcess_t *process) {
     if (process->std_out) free(process->std_out);
     if (process->std_err) free(process->std_err);
     if (process->cwd) free(process->cwd);
-    if (process->env) free_args(process->env);
-    if (process->args) free_args(process->args);
+    if (process->env) free(process->env);
     free(process);
+}
+
+static char **cmd2args(const char *cmd) {
+    static char *prefix = "/usr/bin/env ";
+    char *tmp = malloc((strlen(prefix) + strlen(cmd) + 1) * sizeof(char));
+    tmp[0] = '\0';
+    stpcpy(stpcpy(tmp, prefix), cmd);
+    char **args = parse_args(tmp);
+    free(tmp);
+    return args;
 }
 
 void ForeverProcess_Exec(ForeverProcess_t *process) {
@@ -55,6 +64,8 @@ void ForeverProcess_Exec(ForeverProcess_t *process) {
     uv_process_options_t options;
     int is_root = 0;
     int r;
+    char **args = NULL;
+    char **envs = NULL;
 
     if (getuid() == 0) {
         is_root = 1;
@@ -115,11 +126,18 @@ void ForeverProcess_Exec(ForeverProcess_t *process) {
         options.cwd = NULL;
     }
 
-    options.env = process->env;
     options.stdio_count = 3;
     options.stdio = child_stdio;
-    options.args = process->args;
-    options.file = process->args[0];
+
+    args = cmd2args(process->cmd);
+    options.args = args;
+    options.file = args[0];
+
+    if (process->env) {
+        envs = cmd2args(process->env);
+        options.env = envs;
+    }
+
     options.exit_cb = child_exit_cb;
 
     process->uv_process.data = process;
@@ -139,6 +157,9 @@ void ForeverProcess_Exec(ForeverProcess_t *process) {
     } else {
         mfprintf(stdout, "INFO: %s started", process->name);
     }
+
+    free_args(args);
+    if (envs) free_args(envs);
 }
 
 ProcessList_t *ProcessList_New() {

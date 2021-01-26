@@ -15,7 +15,6 @@
 #include "toml.h"
 
 #include "forever.h"
-#include "parse_args.h"
 #include "process.h"
 
 static ProcessList_t *cur_process_list = NULL;
@@ -30,16 +29,6 @@ void usage() {
             "       -p write pid file\n"
             "       -l write log file\n"
            );
-}
-
-char **cmd2args(const char *cmd) {
-    static char *prefix = "/usr/bin/env ";
-    char *tmp = malloc((strlen(prefix) + strlen(cmd) + 1) * sizeof(char));
-    tmp[0] = '\0';
-    stpcpy(stpcpy(tmp, prefix), cmd);
-    char **args = parse_args(tmp);
-    free(tmp);
-    return args;
 }
 
 ProcessList_t *parse_ini(const char *ini_path) {
@@ -83,7 +72,6 @@ ProcessList_t *parse_ini(const char *ini_path) {
             }
 
             process->cmd  = cmd;
-            process->args = cmd2args(cmd);
 
             if (0 != (svalue = toml_raw_in(sec, "cwd"))) {
                 char *cwd;
@@ -95,35 +83,14 @@ ProcessList_t *parse_ini(const char *ini_path) {
                 process->cwd = cwd;
             }
 
-            toml_array_t *envarr;
-            if (0 != (envarr = toml_array_in(sec, "env"))) {
-                if (toml_array_type(envarr) != 's') {
-                    mfprintf(stderr, "ERROR: invalid %s.env type", process->name);
+            if (0 != (svalue = toml_raw_in(sec, "env"))) {
+                char *env;
+                if (toml_rtos(svalue, &env)) {
+                    mfprintf(stderr, "ERROR: can't parse %s.env", process->name);
                     goto ERROR;
                 }
 
-                int n = toml_array_nelem(envarr);
-                if (n > 0) {
-                    char **envs = calloc(n+1, sizeof(char *));
-
-                    for (int i = 0; i < n; i ++) {
-                        if (0 != (svalue = toml_raw_at(envarr, i))) {
-                            char *env;
-                            if (toml_rtos(svalue, &env)) {
-                                mfprintf(stderr, "ERROR: can't parse %s.[%d]", process->name, i);
-                                free_args(envs);
-                                goto ERROR;
-                            }
-                            envs[i] = env;
-                        } else {
-                            mfprintf(stderr, "ERROR: can't parse %s.env[%d]", process->name, i);
-                            free_args(envs);
-                            goto ERROR;
-                        }
-                    }
-
-                    process->env = envs;
-                }
+                process->env = env;
             }
 
             if (0 != (svalue = toml_raw_in(sec, "stdout"))) {
@@ -362,6 +329,12 @@ void reload(int signal) {
                 mfprintf(stdout, "INFO: %s cmd changed from %s to %s", cur_process->name, cur_process->cmd, new_process->cmd);
                 need_hard_reload = 1;
             }
+
+            if (strcmp(cur_process->env, new_process->env) != 0) {
+                mfprintf(stdout, "INFO: %s env changed from %s to %s", cur_process->name, cur_process->env, new_process->env);
+                need_hard_reload = 1;
+            }
+
 
             if (strcmp(cur_process->std_out, new_process->std_out) != 0) {
                 mfprintf(stdout, "INFO: %s std_out changed from %s to %s", cur_process->name, cur_process->std_out, new_process->std_out);
