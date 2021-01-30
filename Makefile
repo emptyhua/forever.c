@@ -1,5 +1,5 @@
 #CFLAGS=-Wall -g -I./libuv/include
-CFLAGS=-O2 -I./libuv/include
+CFLAGS=-Wall -O2 -I./libuv/include
 #LDFLAGS=-lrt -lpthread -lnsl -ldl -lm
 LDFLAGS=-lpthread
 

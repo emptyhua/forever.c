@@ -91,12 +91,17 @@ void ForeverProcess_Exec(ForeverProcess_t *process) {
         int fd = open(process->std_out, O_WRONLY|O_APPEND|O_CREAT, 0644);
         if (fd == -1) {
             child_stdio[1].flags = UV_IGNORE;
-            mfprintf(stderr, "ERROR: can't open %s %s", process->std_out, strerror(errno));
+            mfprintf(stderr, "ERROR: %s can't open %s %s", process->name,
+                    process->std_out, strerror(errno));
         } else {
             child_stdio[1].flags = UV_INHERIT_FD;
             child_stdio[1].data.fd = fd;
             if (is_root) {
-                chown(process->std_out, process->uid, process->gid);
+                int ret = chown(process->std_out, process->uid, process->gid);
+                if (ret < 0) {
+                    mfprintf(stderr, "ERROR: %s chown(%s) failed %s", process->name,
+                            process->std_out, strerror(errno));
+                }
             }
         }
     } else {
@@ -113,7 +118,11 @@ void ForeverProcess_Exec(ForeverProcess_t *process) {
             child_stdio[2].flags = UV_INHERIT_FD;
             child_stdio[2].data.fd = fd;
             if (is_root) {
-                chown(process->std_err, process->uid, process->gid);
+                int ret = chown(process->std_err, process->uid, process->gid);
+                if (ret < 0) {
+                    mfprintf(stderr, "ERROR: %s chown(%s) failed %s", process->name,
+                            process->std_err, strerror(errno));
+                }
             }
         }
     } else {

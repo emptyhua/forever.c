@@ -232,7 +232,9 @@ void make_daemon() {
         exit(EXIT_SUCCESS);
 
     umask(0);
-    chdir("/");
+    if (chdir("/") < 0) {
+        mfprintf(stderr, "ERROR: chdir(/) failed %s", strerror(errno));
+    }
 
     int  fd = open("/dev/null", O_RDWR);
     if (fd < 0) {
