@@ -5,12 +5,13 @@ LDFLAGS=-lpthread
 
 all:forever
 
-objects=./libuv/.libs/libuv.a forever.o process.o parse_args.o toml.o
+libuv=./libuv/.libs/libuv.a
+objects=forever.o process.o parse_args.o toml.o
 
-forever:$(objects)
-	gcc $(CFLAGS) $(objects) -o ./forever $(LDFLAGS)
+forever:$(libuv) $(objects)
+	gcc $(CFLAGS) $(objects) $(libuv) -o ./forever $(LDFLAGS)
 
-libuv/.libs/libuv.a:libuv/Makefile
+$(libuv):libuv/Makefile
 	cd ./libuv && make
 
 libuv/Makefile:libuv/autogen.sh
