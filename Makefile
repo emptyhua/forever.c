@@ -6,7 +6,7 @@ LDFLAGS=-lpthread
 all:forever
 
 libuv=./libuv/.libs/libuv.a
-objects=forever.o process.o parse_args.o toml.o
+objects=forever.o process.o parse_args.o toml.o logpipe.o logrotate.o config.o
 
 forever:$(libuv) $(objects)
 	gcc $(CFLAGS) $(objects) $(libuv) -o ./forever $(LDFLAGS)

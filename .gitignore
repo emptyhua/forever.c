@@ -2,6 +2,9 @@ forever
 parse_args
 test.conf
 
+.DS_Store
+tags
+
 # Object files
 *.o
 *.ko

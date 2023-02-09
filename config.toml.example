@@ -1,13 +1,21 @@
+[logrotate]
+# max log size
+maxsize="10M"
+# whether to compress old logs
+compress=1
+# log files are rotated count times before being removed
+rotate=10
+
 [prog1]
 cmd="/bin/somescript"
 stdout="/tmp/xx.log"
 stderr="/tmp/xx.log"
 user="nginx"
 group="nginx"
-# max memory limit, unit: MB
+# max memory limit
 # if the child process reach the threshold,
 # forever deamon will send kill signal, and restart the process
-maxmem=100
+maxmem="100M"
 # environment variables
 env="V1=abc V2=123"
 # delay time before process restart, uint: second, default: 2

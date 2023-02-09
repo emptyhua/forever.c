@@ -4,21 +4,22 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/types.h>
-#include <pwd.h>
-#include <grp.h>
 #include <sys/resource.h>
 #include <limits.h>
 #include <errno.h>
 
 #include <uv.h>
 
-#include "toml.h"
+#include "utlist.h"
 
 #include "forever.h"
 #include "process.h"
+#include "logrotate.h"
+#include "logpipe.h"
+#include "config.h"
 
-static ProcessList_t *cur_process_list = NULL;
-static char ini_path[PATH_MAX] = {'\0'};
+static ForeverProcess_t *cur_process_list = NULL;
+static char cfg_path[PATH_MAX] = {'\0'};
 static uv_timer_t mem_check_timer;
 
 void usage() {
@@ -29,188 +30,6 @@ void usage() {
             "       -p write pid file\n"
             "       -l write log file\n"
            );
-}
-
-ProcessList_t *parse_ini(const char *ini_path) {
-    FILE* fp;
-    char errbuf[200];
-    toml_table_t *cfg = NULL;
-    toml_table_t *sec = NULL;
-    int i;
-    const char* key = NULL;
-    const char *svalue = NULL;
-    int64_t ivalue;
-    ProcessList_t       *process_list = ProcessList_New();
-
-    ForeverProcess_t *process = NULL;
-
-
-    if (0 == (fp = fopen(ini_path, "r"))) {
-        mfprintf(stderr, "ERROR: can't open %s %s", ini_path, strerror(errno));
-        goto ERROR;
-    }
-
-    cfg = toml_parse_file(fp, errbuf, sizeof(errbuf));
-    if (0 == cfg) {
-        mfprintf(stderr, "ERROR: %s", errbuf);
-        goto ERROR;
-    }
-
-    for (i = 0; 0 != (key = toml_key_in(cfg, i)); i++) {
-        if (0 != (sec = toml_table_in(cfg, key))) {
-            if (0 == (svalue = toml_raw_in(sec, "cmd"))) {
-                continue;
-            }
-
-            process = ForeverProcess_New();
-            process->name = strdup(key);
-
-            char *cmd;
-            if (toml_rtos(svalue, &cmd)) {
-                mfprintf(stderr, "ERROR: can't parse %s.cmd", process->name);
-                goto ERROR;
-            }
-
-            process->cmd  = cmd;
-
-            if (0 != (svalue = toml_raw_in(sec, "cwd"))) {
-                char *cwd;
-                if (toml_rtos(svalue, &cwd)) {
-                    mfprintf(stderr, "ERROR: can't parse %s.cwd", process->name);
-                    goto ERROR;
-                }
-
-                process->cwd = cwd;
-            }
-
-            if (0 != (svalue = toml_raw_in(sec, "env"))) {
-                char *env;
-                if (toml_rtos(svalue, &env)) {
-                    mfprintf(stderr, "ERROR: can't parse %s.env", process->name);
-                    goto ERROR;
-                }
-
-                process->env = env;
-            }
-
-            if (0 != (svalue = toml_raw_in(sec, "stdout"))) {
-                char *p;
-                if (toml_rtos(svalue, &p)) {
-                    mfprintf(stderr, "ERROR: can't parse %s.stdout", process->name);
-                    goto ERROR;
-                }
-
-                FILE *fp = fopen(p, "a+");
-                if (!fp) {
-                    mfprintf(stderr, "ERROR: can't open %s %s", p, strerror(errno));
-                    goto ERROR;
-                }
-                fclose(fp);fp = NULL;
-                process->std_out = p;
-            }
-
-            if (0 != (svalue = toml_raw_in(sec, "stderr"))) {
-                char *p;
-                if (toml_rtos(svalue, &p)) {
-                    mfprintf(stderr, "ERROR: can't parse %s.stderr", process->name);
-                    goto ERROR;
-                }
-
-                FILE *fp = fopen(p, "a+");
-                if (!fp) {
-                    mfprintf(stderr, "ERROR: can't open %s %s", p, strerror(errno));
-                    goto ERROR;
-                }
-                fclose(fp);fp = NULL;
-                process->std_err = p;
-            }
-
-            if (0 != (svalue = toml_raw_in(sec, "user"))) {
-                char *user;
-                if (toml_rtos(svalue, &user)) {
-                    mfprintf(stderr, "ERROR: can't parse %s.user", process->name);
-                    goto ERROR;
-                }
-
-                struct passwd *u;
-                u = getpwnam(user);
-                if (u == NULL) {
-                    mfprintf(stderr, "ERROR: invalid user %s", user);
-                    free(user);user = NULL;
-                    goto ERROR;
-                }
-                free(user);user = NULL;
-
-                if (u->pw_uid != getuid() && getuid() != 0) {
-                    mfprintf(stderr, "ERROR: you must run as root to set uid");
-                    goto ERROR;
-                }
-                process->uid = u->pw_uid;
-            }
-
-            if (0 != (svalue = toml_raw_in(sec, "group"))) {
-                char *group;
-                if (toml_rtos(svalue, &group)) {
-                    mfprintf(stderr, "ERROR: can't parse %s.group", process->name);
-                    goto ERROR;
-                }
-
-                struct group *grp;
-                grp = getgrnam(group);
-                if (grp == NULL) {
-                    mfprintf(stderr, "ERROR: invalid group %s", svalue);
-                    free(group); group = NULL;
-                    goto ERROR;
-                }
-                free(group); group = NULL;
-
-                if (grp->gr_gid != getgid() && getuid() != 0) {
-                    mfprintf(stderr, "ERROR: you must run as root to set gid");
-                    goto ERROR;
-                }
-                process->gid = grp->gr_gid;
-            }
-
-            if (0 != (svalue = toml_raw_in(sec, "maxmem"))) {
-                if (toml_rtoi(svalue, &ivalue)) {
-                    mfprintf(stderr, "ERROR: invalid maxmem %s", svalue);
-                    goto ERROR;
-                }
-                process->maxmem = (size_t)ivalue;
-            }
-
-            if (0 != (svalue = toml_raw_in(sec, "restart_delay"))) {
-                if (toml_rtoi(svalue, &ivalue)) {
-                    mfprintf(stderr, "ERROR: invalid restart_delay %s", svalue);
-                    goto ERROR;
-                }
-                process->restart_delay = (int)ivalue;
-            } else {
-                process->restart_delay = 2;
-            }
-
-            ProcessList_Append(process_list, process);
-        }
-    }
-
-    if (cfg) {
-        toml_free(cfg);cfg = NULL;
-    }
-
-    return process_list;
-
-ERROR:
-    if (cfg) {
-        toml_free(cfg);cfg = NULL;
-    }
-
-    if (process) {
-        ForeverProcess_Free(process);process = NULL;
-    }
-
-    ProcessList_Free(process_list);process_list = NULL;
-
-    return NULL;
 }
 
 void make_daemon() {
@@ -265,26 +84,22 @@ size_t get_rss_by_pid(pid_t pid) {
 }
 
 void check_mem(uv_timer_t *handle) {
-    ForeverProcess_t *process = cur_process_list->head;
-    while(process) {
+    ForeverProcess_t *process;
+    DL_FOREACH(cur_process_list, process) {
         if (process->pid && process->maxmem) {
             size_t cmem = get_rss_by_pid(process->pid);
             if (cmem > process->maxmem) {
                 mfprintf(stderr, "ERROR: %s reach max mem limit, cur:%zu, max:%zu", process->name, cmem, process->maxmem);
-                uv_kill(process->pid, SIGTERM);
+                ForeverProcess_Restart(process);
             }
         }
-        process = process->next;
     }
 }
 
 void cleanup(int signal) {
-    ForeverProcess_t *process = cur_process_list->head;
-    while(process) {
-        if (process->pid) {
-            uv_kill(process->pid, SIGTERM);
-        }
-        process = process->next;
+    ForeverProcess_t *process;
+    DL_FOREACH(cur_process_list, process) {
+        ForeverProcess_Stop(process);
     }
     exit(0);
 }
@@ -292,14 +107,17 @@ void cleanup(int signal) {
 void reload(int signal) {
     ForeverProcess_t *cur_process;
     ForeverProcess_t *new_process;
-    ForeverProcess_t *next;
-    ProcessList_t *new_process_list;
-    ProcessList_t *hard_reload_list = ProcessList_New();
+    ForeverProcess_t *tmp;
+    ForeverProcess_t *new_process_list = NULL;
+    ForeverProcess_t *hard_reload_list = NULL;
 
-    new_process_list = parse_ini(ini_path);
-    if (!new_process_list) {
+    ForeverConfig_t *config = ParseConfig(cfg_path);
+    if (!config) {
         return;
     }
+
+    new_process_list = config->process_list;
+    LogRotate_SetConfig(config->rotate_config);
 
     switch (signal) {
         case SIGUSR1:
@@ -312,19 +130,12 @@ void reload(int signal) {
             return;
     }
 
-    cur_process = cur_process_list->head;
-    while(cur_process) {
-        new_process = ProcessList_GetProcessByName(new_process_list, cur_process->name);
+    DL_FOREACH_SAFE(cur_process_list, cur_process, tmp) {
+        new_process = ProcessList_FindByName(new_process_list, cur_process->name);
         if (!new_process) {
-            if (cur_process->pid) {
-                cur_process->uv_process.data = NULL;
-                mfprintf(stdout, "INFO: kill %s", cur_process->name);
-                uv_kill(cur_process->pid, SIGTERM);
-            }
-            next = cur_process->next;
-            ProcessList_Remove(cur_process_list, cur_process);
+            mfprintf(stdout, "INFO: remove and stop %s", cur_process->name);
+            DL_DELETE(cur_process_list, cur_process);
             ForeverProcess_Free(cur_process);
-            cur_process = next;
         } else {
             int need_hard_reload = 0;
             if (strcmp(cur_process->cmd, new_process->cmd) != 0) {
@@ -337,15 +148,18 @@ void reload(int signal) {
                 need_hard_reload = 1;
             }
 
-
-            if (strcmp(cur_process->std_out, new_process->std_out) != 0) {
-                mfprintf(stdout, "INFO: %s std_out changed from %s to %s", cur_process->name, cur_process->std_out, new_process->std_out);
-                need_hard_reload = 1;
+            if (strcmp(cur_process->stdout_path, new_process->stdout_path) != 0) {
+                mfprintf(stdout, "INFO: %s stdout_path changed from %s to %s", cur_process->name, cur_process->stdout_path, new_process->stdout_path);
+                if (cur_process->stdout_path) free(cur_process->stdout_path);
+                cur_process->stdout_path = strdup(new_process->stdout_path);
+                LogPipe_SetPath(cur_process->stdout_pipe, cur_process->stdout_path);
             }
 
-            if (strcmp(cur_process->std_err, new_process->std_err) != 0) {
-                mfprintf(stdout, "INFO: %s std_err changed from %s to %s", cur_process->name, cur_process->std_err, new_process->std_err);
-                need_hard_reload = 1;
+            if (strcmp(cur_process->stderr_path, new_process->stderr_path) != 0) {
+                mfprintf(stdout, "INFO: %s stderr_path changed from %s to %s", cur_process->name, cur_process->stderr_path, new_process->stderr_path);
+                if (cur_process->stderr_path) free(cur_process->stderr_path);
+                cur_process->stderr_path = strdup(new_process->stderr_path);
+                LogPipe_SetPath(cur_process->stderr_pipe, cur_process->stderr_path);
             }
 
             if (cur_process->uid != new_process->uid) {
@@ -371,60 +185,39 @@ void reload(int signal) {
             if (need_hard_reload) {
                 if (signal == SIGUSR1) {
                     mfprintf(stdout, "WARN: %s need hard reload !", cur_process->name);
-                    ProcessList_Remove(new_process_list, new_process);
+                    DL_DELETE(new_process_list, new_process);
                     ForeverProcess_Free(new_process);new_process = NULL;
-                    cur_process = cur_process->next;
                 } else {
-                    mfprintf(stdout, "INFO: restart %s", cur_process->name);
+                    mfprintf(stdout, "INFO: hard reload %s", cur_process->name);
 
-                    if (cur_process->pid) {
-                        cur_process->uv_process.data = NULL;
-                        mfprintf(stdout, "INFO: kill %s", cur_process->name);
-                        uv_kill(cur_process->pid, SIGTERM);
-                    }
-
-                    next = cur_process->next;
-                    ProcessList_Remove(cur_process_list, cur_process);
+                    DL_DELETE(cur_process_list, cur_process);
                     ForeverProcess_Free(cur_process);
 
-                    ProcessList_Remove(new_process_list, new_process);
-                    ProcessList_Append(hard_reload_list, new_process);
-
-                    cur_process = next;
+                    DL_DELETE(new_process_list, new_process);
+                    DL_APPEND(hard_reload_list, new_process);
                 }
             } else {
-                ProcessList_Remove(new_process_list, new_process);
+                DL_DELETE(new_process_list, new_process);
                 ForeverProcess_Free(new_process);new_process = NULL;
-                cur_process = cur_process->next;
             }
         }
     }
 
-    new_process = new_process_list->head;
-    while (new_process) {
-        if (!ProcessList_GetProcessByName(cur_process_list, new_process->name)) {
+    DL_FOREACH_SAFE(new_process_list, new_process, tmp) {
+        if (!ProcessList_FindByName(cur_process_list, new_process->name)) {
             mfprintf(stdout, "INFO: start %s", new_process->name);
-            next = new_process->next;
-            ProcessList_Remove(new_process_list, new_process);
-            ProcessList_Append(cur_process_list, new_process);
+            DL_DELETE(new_process_list, new_process);
+            DL_APPEND(cur_process_list, new_process);
             ForeverProcess_Exec(new_process);
-            new_process = next;
-        } else {
-            new_process = new_process->next;
         }
     }
 
-    new_process = hard_reload_list->head;
-    while (new_process) {
-        mfprintf(stdout, "INFO: start %s", new_process->name);
-        ProcessList_Append(cur_process_list, new_process);
+    DL_FOREACH_SAFE(hard_reload_list, new_process, tmp) {
+        DL_DELETE(hard_reload_list, new_process);
+        DL_APPEND(cur_process_list, new_process);
         ForeverProcess_Exec(new_process);
-        new_process = new_process->next;
     }
 
-    hard_reload_list->head = NULL;
-    hard_reload_list->tail = NULL;
-    ProcessList_Free(hard_reload_list);
     ProcessList_Free(new_process_list);
 }
 
@@ -439,7 +232,7 @@ int main(int argc, char **argv) {
     while ((c = getopt(argc, argv, "c:p:dl:")) != -1) {
         switch(c) {
             case 'c':
-                if (!realpath(optarg, ini_path)) {
+                if (!realpath(optarg, cfg_path)) {
                     fprintf(stderr, "can't resolve %s\n", optarg);
                     exit(EXIT_FAILURE);
                 }
@@ -456,19 +249,20 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (ini_path[0] == '\0') {
+    if (cfg_path[0] == '\0') {
         usage();exit(EXIT_FAILURE);
     }
 
-    cur_process_list = parse_ini(ini_path);
-    if (!cur_process_list) {
+    ForeverConfig_t *config = ParseConfig(cfg_path);
+    if (!config) {
         exit(EXIT_FAILURE);
     }
+    cur_process_list = config->process_list;
 
     if (log_path[0] != '\0') {
         FILE *fp = fopen(log_path, "a+");
         if (!fp) {
-            fprintf(stderr, "can't open %s\n", log_path);
+            mfprintf(stderr, "can't open %s\n", log_path);
             exit(EXIT_FAILURE);
         }
         fclose(fp);
@@ -481,7 +275,7 @@ int main(int argc, char **argv) {
     if (log_path[0] != '\0') {
         FILE *fp = fopen(log_path, "a+");
         if (!fp) {
-            fprintf(stderr, "can't open %s\n", log_path);
+            mfprintf(stderr, "can't open %s\n", log_path);
             exit(EXIT_FAILURE);
         }
         dup2(fileno(fp), STDOUT_FILENO);
@@ -489,23 +283,23 @@ int main(int argc, char **argv) {
         fclose(fp);
     }
 
+    char pid_str[255];
+    sprintf(pid_str, "%d", getpid());
+    mfprintf(stdout, "INFO: forever pid:%s", pid_str);
+
     if (pid_path[0] != '\0') {
-        char pid_str[255];
         FILE *fp;
         fp  = fopen(pid_path, "w");
         if (!fp) {
-            fprintf(stderr, "can't open %s\n", pid_path);
+            mfprintf(stderr, "can't open %s\n", pid_path);
             exit(EXIT_FAILURE);
         }
-        sprintf(pid_str, "%d", getpid());
         fwrite(pid_str, sizeof(char), strlen(pid_str), fp);
         fclose(fp);fp = NULL;
     }
 
-    process = cur_process_list->head;
-    while(process) {
+    DL_FOREACH(cur_process_list, process) {
         ForeverProcess_Exec(process);
-        process = process->next;
     }
 
     signal(SIGPIPE, SIG_IGN);
@@ -515,6 +309,9 @@ int main(int argc, char **argv) {
 
     uv_timer_init(uv_default_loop(), &mem_check_timer);
     uv_timer_start(&mem_check_timer, check_mem, 1000, 5000);
+
+    LogRotate_SetConfig(config->rotate_config);
+    LogRotate_Run();
 
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
