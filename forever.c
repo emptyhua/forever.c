@@ -86,8 +86,8 @@ size_t get_rss_by_pid(pid_t pid) {
 void check_mem(uv_timer_t *handle) {
     ForeverProcess_t *process;
     DL_FOREACH(cur_process_list, process) {
-        if (process->pid && process->maxmem) {
-            size_t cmem = get_rss_by_pid(process->pid);
+        if (process->uv_process && process->maxmem) {
+            size_t cmem = get_rss_by_pid(process->uv_process->pid);
             if (cmem > process->maxmem) {
                 mfprintf(stderr, "ERROR: %s reach max mem limit, cur:%zu, max:%zu", process->name, cmem, process->maxmem);
                 ForeverProcess_Restart(process);

@@ -36,12 +36,11 @@ static void child_close_cb(uv_handle_t* uv_process) {
     ForeverProcess_t *process = (ForeverProcess_t *)uv_process->data;
 
     free(uv_process);
+    process->uv_process = NULL;
 
     if (!process) {
         return;
     }
-
-    process->uv_process = NULL;
 
     if (process->stoped) {
         return;
@@ -128,16 +127,16 @@ static char **cmd2args(const char *cmd) {
 }
 
 void ForeverProcess_Exec(ForeverProcess_t *process) {
+    if (process->uv_process) {
+        mfprintf(stderr, "ERROR: %s already started", process->name);
+        return;
+    }
+
     uv_stdio_container_t child_stdio[3];
     uv_process_options_t options;
-    int is_root = 0;
     int r;
     char **args = NULL;
     char **envs = NULL;
-
-    if (getuid() == 0) {
-        is_root = 1;
-    }
 
     options.flags = 0;
 
@@ -187,10 +186,6 @@ void ForeverProcess_Exec(ForeverProcess_t *process) {
     }
 
     options.exit_cb = child_exit_cb;
-
-    if (process->uv_process) {
-        uv_close((uv_handle_t *)process->uv_process, free_handle);
-    }
 
     process->uv_process = (uv_process_t *)malloc(sizeof(uv_process_t));
     process->uv_process->data = process;

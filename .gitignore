@@ -4,6 +4,7 @@ test.conf
 
 .DS_Store
 tags
+*.swp
 
 # Object files
 *.o

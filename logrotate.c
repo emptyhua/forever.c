@@ -244,6 +244,7 @@ static void stat_cb(uv_fs_t* req) {
             args[3] = NULL;
 
             uv_process_options_t options;
+            options.flags = 0;
             options.exit_cb = gzip_exit;
             options.file = "/usr/bin/env";
             options.args = args;
