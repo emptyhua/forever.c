@@ -7,6 +7,7 @@
 #include <sys/resource.h>
 #include <limits.h>
 #include <errno.h>
+#include <libgen.h>
 
 #include <uv.h>
 
@@ -18,21 +19,21 @@
 #include "logpipe.h"
 #include "config.h"
 
-static ForeverProcess_t *cur_process_list = NULL;
+#define DEFAULT_CFG_NAME "forever.toml"
+#define DEFAULT_LOG_NAME "forever.log"
+
+static char forever_name[NAME_MAX] = {'\0'};
+static char forever_dir[PATH_MAX] = {'\0'};
+
 static char cfg_path[PATH_MAX] = {'\0'};
+static char pid_path[PATH_MAX] = {'\0'};
+static char log_path[PATH_MAX] = {'\0'};
+static int daemonize = 0;
+
+static ForeverProcess_t *cur_process_list = NULL;
 static uv_timer_t mem_check_timer;
 
-void usage() {
-    fprintf(stderr,
-            "Usage: forever -c <configure file> [-d] [-p <pid file>] [-l <log file>] \n"
-            "       -c read config from file\n"
-            "       -d daemonize \n"
-            "       -p write pid file\n"
-            "       -l write log file\n"
-           );
-}
-
-void make_daemon() {
+static void make_daemon() {
     pid_t pid;
 
     pid = fork();
@@ -68,7 +69,7 @@ void make_daemon() {
 
 
 // http://stackoverflow.com/questions/669438/how-to-get-memory-usage-at-run-time-in-c
-size_t get_rss_by_pid(pid_t pid) {
+static size_t get_rss_by_pid(pid_t pid) {
     long rss = 0L;
     FILE* fp = NULL;
     char path[1024] = {'\0'};
@@ -83,7 +84,7 @@ size_t get_rss_by_pid(pid_t pid) {
     return (size_t)rss * (size_t)sysconf( _SC_PAGESIZE);
 }
 
-void check_mem(uv_timer_t *handle) {
+static void check_mem(uv_timer_t *handle) {
     ForeverProcess_t *process;
     DL_FOREACH(cur_process_list, process) {
         if (process->uv_process && process->maxmem) {
@@ -96,7 +97,7 @@ void check_mem(uv_timer_t *handle) {
     }
 }
 
-void cleanup(int signal) {
+static void cleanup(int signal) {
     ForeverProcess_t *process;
     DL_FOREACH(cur_process_list, process) {
         ForeverProcess_Stop(process);
@@ -104,7 +105,7 @@ void cleanup(int signal) {
     exit(0);
 }
 
-void reload(int signal) {
+static void reload(int signal) {
     ForeverProcess_t *cur_process;
     ForeverProcess_t *new_process;
     ForeverProcess_t *tmp;
@@ -221,24 +222,39 @@ void reload(int signal) {
     ProcessList_Free(new_process_list);
 }
 
-int main(int argc, char **argv) {
-    char pid_path[PATH_MAX] = {'\0'};
-    char log_path[PATH_MAX] = {'\0'};
+static int forever_pid() {
+    int pid = 0;
+
+    FILE *fp = fopen(pid_path, "r");
+    if (fp) {
+        fscanf(fp, "%d", &pid);
+        fclose(fp);fp = NULL;
+    } else {
+        fprintf(stderr, "read pid from %s failed", pid_path);
+    }
+
+    return pid;
+}
+
+static void parse_argv(int argc, char **argv) {
+    char tmp_path[PATH_MAX] = {'\0'};
+    char *tmpc;
     int c;
-    ForeverProcess_t    *process = NULL;
-    int                 daemonize = 0;
+
+    if (argc > 1 && argv[1][0] != '-') {
+        argc --;
+        argv[1] = argv[0];
+        argv ++;
+    }
 
     opterr = 0;
-    while ((c = getopt(argc, argv, "c:p:dl:")) != -1) {
+    while ((c = getopt(argc, argv, "c:dl:")) != -1) {
         switch(c) {
             case 'c':
                 if (!realpath(optarg, cfg_path)) {
                     fprintf(stderr, "can't resolve %s\n", optarg);
                     exit(EXIT_FAILURE);
                 }
-                break;
-            case 'p':
-                snprintf(pid_path, PATH_MAX, "%s", optarg);
                 break;
             case 'l':
                 snprintf(log_path, PATH_MAX, "%s", optarg);
@@ -250,7 +266,36 @@ int main(int argc, char **argv) {
     }
 
     if (cfg_path[0] == '\0') {
-        usage();exit(EXIT_FAILURE);
+        sprintf(cfg_path, "%s/%s", forever_dir, DEFAULT_CFG_NAME);
+    }
+
+    if (log_path[0] == '\0') {
+        sprintf(log_path, "%s/%s", forever_dir, DEFAULT_LOG_NAME);
+    }
+
+    sprintf(tmp_path, "%s", cfg_path);
+    tmpc = tmp_path;
+    while (*tmpc != '\0') {
+        if (*tmpc == '/' || *tmpc == '.') {
+            *tmpc = '_';
+        }
+        tmpc ++;
+    }
+    snprintf(pid_path, PATH_MAX, "/tmp/forever%s.pid", tmp_path);
+}
+
+static void forever_main() {
+    ForeverProcess_t *process;
+
+    FILE *pidfp = fopen(pid_path, "w");
+    if (!pidfp) {
+        mfprintf(stderr, "ERROR: can't open %s", pid_path);
+        exit(EXIT_FAILURE);
+    }
+
+    if (flock(fileno(pidfp), LOCK_EX | LOCK_NB) == -1) {
+        mfprintf(stderr, "ERROR: can't lock %s", pid_path);
+        exit(EXIT_FAILURE);
     }
 
     ForeverConfig_t *config = ParseConfig(cfg_path);
@@ -259,44 +304,31 @@ int main(int argc, char **argv) {
     }
     cur_process_list = config->process_list;
 
-    if (log_path[0] != '\0') {
-        FILE *fp = fopen(log_path, "a+");
-        if (!fp) {
-            mfprintf(stderr, "can't open %s\n", log_path);
-            exit(EXIT_FAILURE);
-        }
-        fclose(fp);
+    FILE *logfp = fopen(log_path, "a+");
+    if (!logfp) {
+        mfprintf(stderr, "can't open log %s\n", log_path);
+        exit(EXIT_FAILURE);
     }
 
     if (daemonize) {
         make_daemon();
     }
 
-    if (log_path[0] != '\0') {
-        FILE *fp = fopen(log_path, "a+");
-        if (!fp) {
-            mfprintf(stderr, "can't open %s\n", log_path);
-            exit(EXIT_FAILURE);
-        }
-        dup2(fileno(fp), STDOUT_FILENO);
-        dup2(fileno(fp), STDERR_FILENO);
-        fclose(fp);
+    if (logfp) {
+        dup2(fileno(logfp), STDOUT_FILENO);
+        dup2(fileno(logfp), STDERR_FILENO);
+        fclose(logfp); logfp = NULL;
     }
 
-    char pid_str[255];
-    sprintf(pid_str, "%d", getpid());
-    mfprintf(stdout, "INFO: forever pid:%s", pid_str);
+    do {
+        int pid = getpid();
 
-    if (pid_path[0] != '\0') {
-        FILE *fp;
-        fp  = fopen(pid_path, "w");
-        if (!fp) {
-            mfprintf(stderr, "can't open %s\n", pid_path);
-            exit(EXIT_FAILURE);
-        }
-        fwrite(pid_str, sizeof(char), strlen(pid_str), fp);
-        fclose(fp);fp = NULL;
-    }
+        mfprintf(stdout, "INFO: forever pid:%d", pid);
+        mfprintf(stdout, "INFO: pid file:%s", pid_path);
+
+        fprintf(pidfp, "%d", pid);
+        fflush(pidfp);
+    } while(0);
 
     DL_FOREACH(cur_process_list, process) {
         ForeverProcess_Exec(process);
@@ -314,6 +346,77 @@ int main(int argc, char **argv) {
     LogRotate_Run();
 
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
+}
+
+void usage() {
+    fprintf(stderr,
+            "Usage: %s <start|stop|pid|reload|hard_reload>\n"
+            " [start] [-c <configure file>] [-d] [-l <log file>] \n"
+            "       -c configure file, default:%s/%s\n"
+            "       -d daemonize \n"
+            "       -l write log file, default:%s/%s\n"
+            " stop [-c <configure file>] \n"
+            " pid [-c <configure file>] \n"
+            " reload [-c <configure file>] \n"
+            " hard_reload [-c <configure file>] \n",
+            forever_name,
+            forever_dir, DEFAULT_CFG_NAME,
+            forever_dir, DEFAULT_LOG_NAME
+           );
+}
+
+int send_signal(int sig) {
+    int pid = forever_pid();
+    if (pid) {
+        uv_kill(pid, sig);
+        return 0;
+    } else {
+        fprintf(stderr, "forever is not running");
+        return 1;
+    }
+}
+
+int main(int argc, char **argv) {
+    argv = uv_setup_args(argc, argv);
+
+    char *tmp_path = malloc(PATH_MAX);
+    size_t tmpsize = (size_t)PATH_MAX;
+    uv_exepath(tmp_path, &tmpsize);
+    strcpy(forever_dir, dirname(tmp_path));
+
+    tmpsize = (size_t)PATH_MAX;
+    uv_exepath(tmp_path, &tmpsize);
+    strcpy(forever_name, basename(tmp_path));
+
+    free(tmp_path); tmp_path = NULL;
+
+    if (argc > 1) {
+        if (strcmp(argv[1], "pid") == 0) {
+            parse_argv(argc, argv);
+            int pid = forever_pid();
+            if (pid) {
+                printf("%d\n", pid);
+                return 0;
+            } else {
+                return 1;
+            }
+        } else if (strcmp(argv[1], "stop") == 0) {
+            parse_argv(argc, argv);
+            return send_signal(SIGTERM);
+        } else if (strcmp(argv[1], "reload") == 0) {
+            parse_argv(argc, argv);
+            return send_signal(SIGUSR1);
+        } else if (strcmp(argv[1], "hard_reload") == 0) {
+            parse_argv(argc, argv);
+            return send_signal(SIGUSR2);
+        } else if (strcmp(argv[1], "-h") == 0 || (argv[1][0] != '-' && strcmp(argv[1], "start") != 0)) {
+            usage();
+            return 1;
+        }
+    }
+
+    parse_argv(argc, argv);
+    forever_main();
 
     return  0;
 }
