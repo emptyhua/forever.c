@@ -149,12 +149,12 @@ static void reload(int signal) {
         } else {
             int need_hard_reload = 0;
             if (strcmp(cur_process->cmd, new_process->cmd) != 0) {
-                mfprintf(stdout, "INFO: %s cmd changed from %s to %s", cur_process->name, cur_process->cmd, new_process->cmd);
+                mfprintf(stdout, "INFO: %s.cmd changed from %s to %s", cur_process->name, cur_process->cmd, new_process->cmd);
                 need_hard_reload = 1;
             }
 
             if (strcmp(safe_null(cur_process->env), safe_null(new_process->env)) != 0) {
-                mfprintf(stdout, "INFO: %s env changed from %s to %s",
+                mfprintf(stdout, "INFO: %s.env changed from %s to %s",
                         cur_process->name,
                         safe_null(cur_process->env),
                         safe_null(new_process->env));
@@ -162,15 +162,15 @@ static void reload(int signal) {
             }
 
             if (strcmp(safe_null(cur_process->cwd), safe_null(new_process->cwd)) != 0) {
-                mfprintf(stdout, "INFO: %s env changed from %s to %s",
+                mfprintf(stdout, "INFO: %s.cwd changed from %s to %s",
                         cur_process->name,
-                        safe_null(cur_process->env),
-                        safe_null(new_process->env));
+                        safe_null(cur_process->cwd),
+                        safe_null(new_process->cwd));
                 need_hard_reload = 1;
             }
 
             if (strcmp(safe_null(cur_process->stdout_path), safe_null(new_process->stdout_path)) != 0) {
-                mfprintf(stdout, "INFO: %s stdout_path changed from %s to %s",
+                mfprintf(stdout, "INFO: %s.stdout_path changed from %s to %s",
                         cur_process->name,
                         safe_null(cur_process->stdout_path),
                         safe_null(new_process->stdout_path));
@@ -180,7 +180,7 @@ static void reload(int signal) {
             }
 
             if (strcmp(safe_null(cur_process->stderr_path), safe_null(new_process->stderr_path)) != 0) {
-                mfprintf(stdout, "INFO: %s stderr_path changed from %s to %s",
+                mfprintf(stdout, "INFO: %s.stderr_path changed from %s to %s",
                         cur_process->name,
                         safe_null(cur_process->stderr_path),
                         safe_null(new_process->stderr_path));
@@ -190,22 +190,22 @@ static void reload(int signal) {
             }
 
             if (cur_process->uid != new_process->uid) {
-                mfprintf(stdout, "INFO: %s uid changed from %d to %d", cur_process->name, cur_process->uid, new_process->uid);
+                mfprintf(stdout, "INFO: %s.uid changed from %d to %d", cur_process->name, cur_process->uid, new_process->uid);
                 need_hard_reload = 1;
             }
 
             if (cur_process->gid != new_process->gid) {
-                mfprintf(stdout, "INFO: %s gid changed from %d to %d", cur_process->name, cur_process->gid, new_process->gid);
+                mfprintf(stdout, "INFO: %s.gid changed from %d to %d", cur_process->name, cur_process->gid, new_process->gid);
                 need_hard_reload = 1;
             }
 
             if (cur_process->maxmem != new_process->maxmem) {
-                mfprintf(stdout, "INFO: %s maxmem changed from %zu to %zu", cur_process->name, cur_process->maxmem, new_process->maxmem);
+                mfprintf(stdout, "INFO: %s.maxmem changed from %zu to %zu", cur_process->name, cur_process->maxmem, new_process->maxmem);
                 cur_process->maxmem = new_process->maxmem;
             }
 
             if (cur_process->restart_delay != new_process->restart_delay) {
-                mfprintf(stdout, "INFO: %s restart_delay changed from %d to %d", cur_process->name, cur_process->restart_delay, new_process->restart_delay);
+                mfprintf(stdout, "INFO: %s.restart_delay changed from %d to %d", cur_process->name, cur_process->restart_delay, new_process->restart_delay);
                 cur_process->restart_delay = new_process->restart_delay;
             }
 
