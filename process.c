@@ -183,6 +183,8 @@ void ForeverProcess_Exec(ForeverProcess_t *process) {
     if (process->env) {
         envs = cmd2args(process->env);
         options.env = envs;
+    } else {
+        options.env = NULL;
     }
 
     options.exit_cb = child_exit_cb;
