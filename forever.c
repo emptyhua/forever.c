@@ -106,6 +106,14 @@ static void cleanup(int signal) {
     exit(0);
 }
 
+static char *safe_null(char *s) {
+    static char *n = "";
+    if (s == NULL) {
+        return n;
+    }
+    return s;
+}
+
 static void reload(int signal) {
     ForeverProcess_t *cur_process;
     ForeverProcess_t *new_process;
@@ -145,20 +153,37 @@ static void reload(int signal) {
                 need_hard_reload = 1;
             }
 
-            if (strcmp(cur_process->env, new_process->env) != 0) {
-                mfprintf(stdout, "INFO: %s env changed from %s to %s", cur_process->name, cur_process->env, new_process->env);
+            if (strcmp(safe_null(cur_process->env), safe_null(new_process->env)) != 0) {
+                mfprintf(stdout, "INFO: %s env changed from %s to %s",
+                        cur_process->name,
+                        safe_null(cur_process->env),
+                        safe_null(new_process->env));
                 need_hard_reload = 1;
             }
 
-            if (strcmp(cur_process->stdout_path, new_process->stdout_path) != 0) {
-                mfprintf(stdout, "INFO: %s stdout_path changed from %s to %s", cur_process->name, cur_process->stdout_path, new_process->stdout_path);
+            if (strcmp(safe_null(cur_process->cwd), safe_null(new_process->cwd)) != 0) {
+                mfprintf(stdout, "INFO: %s env changed from %s to %s",
+                        cur_process->name,
+                        safe_null(cur_process->env),
+                        safe_null(new_process->env));
+                need_hard_reload = 1;
+            }
+
+            if (strcmp(safe_null(cur_process->stdout_path), safe_null(new_process->stdout_path)) != 0) {
+                mfprintf(stdout, "INFO: %s stdout_path changed from %s to %s",
+                        cur_process->name,
+                        safe_null(cur_process->stdout_path),
+                        safe_null(new_process->stdout_path));
                 if (cur_process->stdout_path) free(cur_process->stdout_path);
                 cur_process->stdout_path = strdup(new_process->stdout_path);
                 LogPipe_SetPath(cur_process->stdout_pipe, cur_process->stdout_path);
             }
 
-            if (strcmp(cur_process->stderr_path, new_process->stderr_path) != 0) {
-                mfprintf(stdout, "INFO: %s stderr_path changed from %s to %s", cur_process->name, cur_process->stderr_path, new_process->stderr_path);
+            if (strcmp(safe_null(cur_process->stderr_path), safe_null(new_process->stderr_path)) != 0) {
+                mfprintf(stdout, "INFO: %s stderr_path changed from %s to %s",
+                        cur_process->name,
+                        safe_null(cur_process->stderr_path),
+                        safe_null(new_process->stderr_path));
                 if (cur_process->stderr_path) free(cur_process->stderr_path);
                 cur_process->stderr_path = strdup(new_process->stderr_path);
                 LogPipe_SetPath(cur_process->stderr_pipe, cur_process->stderr_path);
