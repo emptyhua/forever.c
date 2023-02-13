@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <pwd.h>
 #include <grp.h>
 
@@ -248,8 +249,7 @@ ForeverConfig_t *ParseConfig(const char *cfg_path) {
 
     ForeverConfig_t *config = calloc(1, sizeof(ForeverConfig_t));
     // default rotate config
-    // config->rotate_config.maxsize = 100 * 1024 * 1024; // 100M
-    config->rotate_config.maxsize = 1024;
+    config->rotate_config.maxsize = 100 * 1024 * 1024; // 100M
     config->rotate_config.rotate = 10;
     config->rotate_config.compress = 1;
 

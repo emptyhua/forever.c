@@ -1,4 +1,5 @@
 forever
+forever.log
 parse_args
 test.conf
 

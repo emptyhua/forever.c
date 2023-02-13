@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/types.h>
+#include <sys/file.h>
 #include <sys/resource.h>
 #include <limits.h>
 #include <errno.h>
@@ -266,14 +267,14 @@ static void parse_argv(int argc, char **argv) {
     }
 
     if (cfg_path[0] == '\0') {
-        sprintf(cfg_path, "%s/%s", forever_dir, DEFAULT_CFG_NAME);
+        snprintf(cfg_path, PATH_MAX, "%s/%s", forever_dir, DEFAULT_CFG_NAME);
     }
 
     if (log_path[0] == '\0') {
-        sprintf(log_path, "%s/%s", forever_dir, DEFAULT_LOG_NAME);
+        snprintf(log_path, PATH_MAX, "%s/%s", forever_dir, DEFAULT_LOG_NAME);
     }
 
-    sprintf(tmp_path, "%s", cfg_path);
+    strcpy(tmp_path, cfg_path);
     tmpc = tmp_path;
     while (*tmpc != '\0') {
         if (*tmpc == '/' || *tmpc == '.') {
