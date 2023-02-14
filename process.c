@@ -32,7 +32,21 @@ static void child_restart(uv_timer_t *handle) {
     ForeverProcess_Exec(process);
 }
 
-static void child_close_cb(uv_handle_t* uv_process) {
+static void retry_later(ForeverProcess_t *process) {
+    process->restart_ing = 1;
+
+    if (!process->restart_timer) {
+        process->restart_timer = (uv_timer_t *) malloc(sizeof(uv_timer_t));
+        uv_timer_init(uv_default_loop(), process->restart_timer);
+        process->restart_timer->data = process;
+    }
+
+    mfprintf(stdout, "INFO: restart %s after %d seconds", process->name, process->restart_delay);
+
+    uv_timer_start(process->restart_timer, child_restart, process->restart_delay * 1000, 0);
+}
+
+static void child_close_cb(uv_handle_t *uv_process) {
     ForeverProcess_t *process = (ForeverProcess_t *)uv_process->data;
 
     free(uv_process);
@@ -46,15 +60,7 @@ static void child_close_cb(uv_handle_t* uv_process) {
         return;
     }
 
-    process->restart_ing = 1;
-
-    if (!process->restart_timer) {
-        process->restart_timer = (uv_timer_t *) malloc(sizeof(uv_timer_t));
-        uv_timer_init(uv_default_loop(), process->restart_timer);
-        process->restart_timer->data = process;
-    }
-
-    uv_timer_start(process->restart_timer, child_restart, process->restart_delay * 1000, 0);
+    retry_later(process);
 }
 
 static void child_exit_cb(uv_process_t *uv_process, int64_t exit_status, int term_signal) {
@@ -138,7 +144,7 @@ void ForeverProcess_Exec(ForeverProcess_t *process) {
     char **args = NULL;
     char **envs = NULL;
 
-    options.flags = 0;
+    memset(&options, 0, sizeof(options));
 
     if (process->uid != 0) {
         options.flags |= UV_PROCESS_SETUID;
@@ -169,8 +175,6 @@ void ForeverProcess_Exec(ForeverProcess_t *process) {
 
     if (process->cwd) {
         options.cwd = process->cwd;
-    } else {
-        options.cwd = NULL;
     }
 
     options.stdio_count = 3;
@@ -183,8 +187,6 @@ void ForeverProcess_Exec(ForeverProcess_t *process) {
     if (process->env) {
         envs = cmd2args(process->env);
         options.env = envs;
-    } else {
-        options.env = NULL;
     }
 
     options.exit_cb = child_exit_cb;
@@ -196,7 +198,8 @@ void ForeverProcess_Exec(ForeverProcess_t *process) {
     if (r < 0) {
         free(process->uv_process);
         process->uv_process = NULL;
-        mfprintf(stderr, "ERROR: %s start failed:'%s' %s", process->name, options.file, uv_strerror(r));
+        mfprintf(stderr, "ERROR: %s start failed:'%s' %s", process->name, process->cmd, uv_strerror(r));
+        retry_later(process);
     } else {
         mfprintf(stdout, "INFO: %s started", process->name);
         LogPipe_Start(process->stdout_pipe);

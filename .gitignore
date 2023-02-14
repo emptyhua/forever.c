@@ -1,7 +1,9 @@
 forever
-forever.log
+forever.toml
 parse_args
 test.conf
+*.gz
+*.log
 
 .DS_Store
 tags

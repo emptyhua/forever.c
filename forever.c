@@ -103,6 +103,7 @@ static void cleanup(int signal) {
     DL_FOREACH(cur_process_list, process) {
         ForeverProcess_Stop(process);
     }
+    unlink(pid_path);
     exit(0);
 }
 
@@ -189,13 +190,19 @@ static void reload(int signal) {
                 LogPipe_SetPath(cur_process->stderr_pipe, cur_process->stderr_path);
             }
 
-            if (cur_process->uid != new_process->uid) {
-                mfprintf(stdout, "INFO: %s.uid changed from %d to %d", cur_process->name, cur_process->uid, new_process->uid);
+            if (strcmp(safe_null(cur_process->user), safe_null(new_process->user)) != 0) {
+                mfprintf(stdout, "INFO: %s.user changed from %s to %s",
+                        cur_process->name,
+                        safe_null(cur_process->user),
+                        safe_null(new_process->user));
                 need_hard_reload = 1;
             }
 
-            if (cur_process->gid != new_process->gid) {
-                mfprintf(stdout, "INFO: %s.gid changed from %d to %d", cur_process->name, cur_process->gid, new_process->gid);
+            if (strcmp(safe_null(cur_process->group), safe_null(new_process->group)) != 0) {
+                mfprintf(stdout, "INFO: %s.group changed from %s to %s",
+                        cur_process->name,
+                        safe_null(cur_process->group),
+                        safe_null(new_process->group));
                 need_hard_reload = 1;
             }
 
@@ -245,7 +252,7 @@ static void reload(int signal) {
         ForeverProcess_Exec(new_process);
     }
 
-    ProcessList_Free(new_process_list);
+    ProcessList_Free(new_process_list); new_process_list = NULL;
 }
 
 static int forever_pid() {
@@ -310,16 +317,27 @@ static void parse_argv(int argc, char **argv) {
     snprintf(pid_path, PATH_MAX, "/tmp/forever%s.pid", tmp_path);
 }
 
+static void ascii_title() {
+    printf(
+    "#   ___  __   __   ___       ___  __  \n"
+    "#  |__  /  \\ |__) |__  \\  / |__  |__) \n"
+    "#  |    \\__/ |  \\ |___  \\/  |___ |  \\\n"
+    "#                                     \n"
+    );
+    printf("# config path:%s\n", cfg_path);
+    printf("# log    path:%s\n", log_path);
+}
+
 static void forever_main() {
     ForeverProcess_t *process;
 
-    FILE *pidfp = fopen(pid_path, "w");
-    if (!pidfp) {
+    FILE *lockfp = fopen(pid_path, "a+");
+    if (!lockfp) {
         mfprintf(stderr, "ERROR: can't open %s", pid_path);
         exit(EXIT_FAILURE);
     }
 
-    if (flock(fileno(pidfp), LOCK_EX | LOCK_NB) == -1) {
+    if (flock(fileno(lockfp), LOCK_EX | LOCK_NB) == -1) {
         mfprintf(stderr, "ERROR: can't lock %s", pid_path);
         exit(EXIT_FAILURE);
     }
@@ -330,21 +348,39 @@ static void forever_main() {
     }
     cur_process_list = config->process_list;
 
-    FILE *logfp = fopen(log_path, "a+");
-    if (!logfp) {
-        mfprintf(stderr, "can't open log %s\n", log_path);
-        exit(EXIT_FAILURE);
-    }
+    do {
+        // test log permission
+        FILE *logfp = fopen(log_path, "a+");
+        if (!logfp) {
+            mfprintf(stderr, "can't open log %s\n", log_path);
+            exit(EXIT_FAILURE);
+        }
+        fclose(logfp);
+
+        char tmp[PATH_MAX];
+        realpath(log_path, tmp);
+        strcpy(log_path, tmp);
+    } while(0);
+
+    ascii_title();
 
     if (daemonize) {
         make_daemon();
     }
 
-    if (logfp) {
-        dup2(fileno(logfp), STDOUT_FILENO);
-        dup2(fileno(logfp), STDERR_FILENO);
-        fclose(logfp); logfp = NULL;
-    }
+    do {
+        LogPipe_t *lp = LogPipe_New();
+        int fd[2];
+        pipe(fd);
+        uv_pipe_open(lp->out, fd[0]);
+        dup2(fd[1], STDOUT_FILENO);
+        dup2(fd[1], STDERR_FILENO);
+        close(fd[1]);
+
+        LogPipe_SetPath(lp, log_path);
+        LogPipe_Start(lp);
+        LogRotate_Add(lp);
+    } while(0);
 
     do {
         int pid = getpid();
@@ -352,8 +388,14 @@ static void forever_main() {
         mfprintf(stdout, "INFO: forever pid:%d", pid);
         mfprintf(stdout, "INFO: pid file:%s", pid_path);
 
-        fprintf(pidfp, "%d", pid);
-        fflush(pidfp);
+        FILE *fp = fopen(pid_path, "w");
+        if (!fp) {
+            mfprintf(stderr, "ERROR: can't open %s", pid_path);
+            exit(EXIT_FAILURE);
+        }
+
+        fprintf(fp, "%d", pid);
+        fclose(fp); fp = NULL;
     } while(0);
 
     DL_FOREACH(cur_process_list, process) {
@@ -374,7 +416,7 @@ static void forever_main() {
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 }
 
-void usage() {
+static void usage() {
     fprintf(stderr,
             "Usage: %s <start|stop|pid|reload|hard_reload>\n"
             " [start] [-c <configure file>] [-d] [-l <log file>] \n"
@@ -391,7 +433,7 @@ void usage() {
            );
 }
 
-int send_signal(int sig) {
+static int send_signal(int sig) {
     int pid = forever_pid();
     if (pid) {
         uv_kill(pid, sig);
@@ -435,7 +477,9 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[1], "hard_reload") == 0) {
             parse_argv(argc, argv);
             return send_signal(SIGUSR2);
-        } else if (strcmp(argv[1], "-h") == 0 || (argv[1][0] != '-' && strcmp(argv[1], "start") != 0)) {
+        } else if (strcmp(argv[1], "-h") == 0 ||
+                strcmp(argv[1], "--help") == 0 ||
+                (argv[1][0] != '-' && strcmp(argv[1], "start") != 0)) {
             usage();
             return 1;
         }
